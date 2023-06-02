@@ -2,7 +2,7 @@
 pragma solidity 0.8.18;
 
 import "../interfaces/AggregatorV3Interface.sol";
-import "forge-std/interfaces/IERC20.sol";
+import "../interfaces/IERC20.sol";
 
 contract CryptoAssetInsuranceFactory {
     address immutable owner;

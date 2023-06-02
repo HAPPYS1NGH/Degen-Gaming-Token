@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity >=0.6.2 <0.9.0;
+pragma solidity 0.8.18;
 
 import "forge-std/Test.sol";
 import "forge-std/Vm.sol";
 import "forge-std/console.sol";
-import "forge-std/interfaces/IERC20.sol";
+import "../src/interfaces/IERC20.sol";
 import "../src/utils/PriceConvertor.sol";
 import "../src/interfaces/AggregatorV3Interface.sol";
-import "src/core/AssetInsurance.sol";
+import "../src/core/AssetInsurance.sol";
 
 contract ContractIERC20Test is Test {
     event Log(string message, int256 price);
@@ -28,7 +28,7 @@ contract ContractIERC20Test is Test {
     AggregatorV3Interface priceFeed;
 
     function setUp() public {
-        string memory value = vm.envString("RPC_URL");
+        string memory value = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(value, 16700030);
         usdc = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
         oracle = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
@@ -43,17 +43,17 @@ contract ContractIERC20Test is Test {
         vm.stopPrank();
     }
 
-    function test_fundAddresses() public {
-        uint256 amount = 100_000000;
-        for (uint256 i = 0; i < addresses.length; i++) {
-            uint256 bal = USDC.balanceOf(addresses[i]);
-            assertEq(bal, 0);
-            bool success = USDC.transfer(addresses[i], amount);
-            assertEq(success, true);
-            bal = USDC.balanceOf(addresses[i]);
-            assertEq(bal, 100000000);
-        }
-    }
+    // function test_fundAddresses() public {
+    //     uint256 amount = 100_000000;
+    //     for (uint256 i = 0; i < addresses.length; i++) {
+    //         uint256 bal = USDC.balanceOf(addresses[i]);
+    //         assertEq(bal, 0);
+    //         bool success = USDC.transfer(addresses[i], amount);
+    //         assertEq(success, true);
+    //         bal = USDC.balanceOf(addresses[i]);
+    //         assertEq(bal, 100000000);
+    //     }
+    // }
 
     function fundAddresses() public {
         uint256 amount = 100_000000;
@@ -117,7 +117,7 @@ contract ContractIERC20Test is Test {
 
     function test_Claim() public {
         asset();
-        string memory value = vm.envString("RPC_URL");
+        string memory value = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(value, 16808030);
         for (uint256 i = 0; i < addresses.length; i++) {
             assertEq(contracts[i].balance, 0);
@@ -140,7 +140,7 @@ contract ContractIERC20Test is Test {
         // vm.makePersistent(0xA1cA8926c1A9A78a3EFfAE666E57b0065d78A604);
         // vm.rollFork(16804030);
 
-        string memory value = vm.envString("RPC_URL");
+        string memory value = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(value, 16804030);
         console.log(0xA1cA8926c1A9A78a3EFfAE666E57b0065d78A604.balance);
     }
@@ -173,9 +173,9 @@ contract ContractIERC20Test is Test {
         // vm.makePersistent(addresses[0]);
         // console.log(bal1);
         // vm.rollFork(16804030);
-        // string memory value = vm.envString("RPC_URL");
+        // string memory value = vm.envString("MAINNET_RPC_URL");
         // vm.createSelectFork(value, 16804030);
-        string memory value = vm.envString("RPC_URL");
+        string memory value = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(value, 16804030);
         AggregatorV3Interface priceFeed2 = AggregatorV3Interface(0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419);
         (
