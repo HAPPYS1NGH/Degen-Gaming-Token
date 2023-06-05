@@ -80,7 +80,7 @@ contract ContractIERC20Test is Test {
             uint256 bal = USDC.balanceOf(addresses[i]);
             assertEq(bal, 100000000);
             uint256 _value = factory.calculateDepositMoney(bal, _planAmount, price, 6, i + 1);
-            factory.getInsurance{value: _value}((i + 1), usdc, (i + 1), oracle, 6);
+            factory.getInsurance{value: _value}((i + 1), usdc, (i + 1), oracle, 6, bal);
             address contractAsset = factory.getCustomerToContract(addresses[i]);
             contracts.push(contractAsset);
             AssetWalletInsurance childContract = AssetWalletInsurance(payable(contractAsset));
@@ -105,11 +105,12 @@ contract ContractIERC20Test is Test {
             uint256 price = factory.getFeedValueOfAsset(oracle);
             uint256 bal = USDC.balanceOf(addresses[i]);
             uint256 _value = factory.calculateDepositMoney(bal, _planAmount, price, 6, i + 1);
-            factory.getInsurance{value: _value}((i + 1), usdc, (i + 1), oracle, 6);
+            factory.getInsurance{value: _value}((i + 1), usdc, (i + 1), oracle, 6, bal);
             address contractAsset = factory.getCustomerToContract(addresses[i]);
             contracts.push(contractAsset);
             vm.makePersistent(addresses[i]);
             vm.makePersistent(contractAsset);
+            vm.makePersistent(usdc);
             vm.makePersistent(address(factory));
             vm.stopPrank();
         }

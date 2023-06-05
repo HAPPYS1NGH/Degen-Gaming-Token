@@ -3,6 +3,7 @@ pragma solidity 0.8.18;
 
 import "../interfaces/AggregatorV3Interface.sol";
 import "../interfaces/IERC20.sol";
+import "forge-std/console.sol";
 
 contract CryptoAssetInsuranceFactory {
     address immutable owner;
@@ -102,12 +103,17 @@ contract CryptoAssetInsuranceFactory {
         return pricePayable;
     }
 
-    function getInsurance(uint8 plan, address assetAddress, uint256 timePeriod, address oracleAddress, uint256 decimals)
-        public
-        payable
-    {
+    function getInsurance(
+        uint8 plan,
+        address assetAddress,
+        uint256 timePeriod,
+        address oracleAddress,
+        uint256 decimals,
+        uint256 tokensInsured
+    ) public payable {
         require(customerToContract[msg.sender] == address(0));
-        uint256 tokensInsured = getTokenBalance(assetAddress, msg.sender);
+        uint256 totalTokens = getTokenBalance(assetAddress, msg.sender);
+        require(tokensInsured > 0 && tokensInsured <= totalTokens, "Invalid Token Amount");
         //decimals left
         uint8 _plan = plans[plan];
         require(_plan != 0, "Invalid Plan");
@@ -134,7 +140,7 @@ contract CryptoAssetInsuranceFactory {
 
     function claimInsurance() public payable {
         // Great Way to stop anyone to call this function by using mapping of contract=>customer
-        require(contractToCustomer[msg.sender] != address(0));
+        require(contractToCustomer[msg.sender] != address(0), "Only Insurance Contract can call this function");
 
         AssetWalletInsurance instance = AssetWalletInsurance(payable(msg.sender));
         uint256 _claimAmount = instance.getClaimAmount();
@@ -191,7 +197,7 @@ contract AssetWalletInsurance {
 
     function verifyInsurance() internal onlyOwner {
         require(timePeriod > block.timestamp, "Oops your Insurance Expired");
-        require(!claimed);
+        require(!claimed, "already claimed");
         uint256 currentPrice = getFeedValueOfAsset(oracleAddress);
         // console.log("Current Price");
         // console.log(currentPrice);
@@ -212,7 +218,14 @@ contract AssetWalletInsurance {
     }
 
     function getInsuranceAmount(uint256 _currentPrice) public view returns (uint256) {
-        return (((priceAtInsurance - _currentPrice) * tokensInsured) / 10 ** decimals);
+        uint256 tokensHold = getTokenBalance(assetAddress, owner);
+        uint256 claimableTokens;
+        if (tokensHold < tokensInsured) {
+            claimableTokens = tokensHold;
+        } else {
+            claimableTokens = tokensInsured;
+        }
+        return (((priceAtInsurance - _currentPrice) * claimableTokens) / 10 ** decimals);
     }
 
     function getFeedValueOfAsset(address _oracleAddress) public view returns (uint256) {
@@ -233,8 +246,8 @@ contract AssetWalletInsurance {
     function claim() public onlyOwner {
         require(!claimed, "Already Claimed Reward");
         verifyInsurance();
-        // console.log("Claim amount is //////////////");
-        // console.log(claimAmount);
+        console.log("Claim amount is //////////////");
+        console.log(claimAmount);
         claimed = true;
         (bool success,) = factoryContract.call(abi.encodeWithSignature("claimInsurance()"));
         require(success, "Transaction Failed in claim");
