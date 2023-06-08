@@ -103,6 +103,22 @@ contract ContractIERC20Test is Test {
         }
     }
 
+    function test_WithoutTokens() public {
+        test_Asset();
+        string memory value = vm.envString("MAINNET_RPC_URL");
+        vm.createSelectFork(value, 16804030);
+        for (uint256 i = 0; i < addresses.length; i++) {
+            console.log(contracts[i].balance);
+            startHoax(addresses[i]);
+            bool success = USDC.transfer(addresses[i], 10_000000);
+            assertEq(success, true);
+            AssetWalletInsurance assetContract = AssetWalletInsurance(payable(contracts[i]));
+            assetContract.claim();
+            console.log(contracts[i].balance);
+            vm.stopPrank();
+        }
+    }
+
     function test_Balance() public {
         test_Asset();
         console.log(0xA1cA8926c1A9A78a3EFfAE666E57b0065d78A604.balance);

@@ -3,7 +3,6 @@ pragma solidity 0.8.18;
 
 import "../interfaces/AggregatorV3Interface.sol";
 import "../interfaces/IERC20.sol";
-import "forge-std/console.sol";
 
 contract CryptoAssetInsuranceFactory {
     address immutable owner;
@@ -246,8 +245,8 @@ contract AssetWalletInsurance {
     function claim() public onlyOwner {
         require(!claimed, "Already Claimed Reward");
         verifyInsurance();
-        console.log("Claim amount is //////////////");
-        console.log(claimAmount);
+        // console.log("Claim amount is //////////////");
+        // console.log(claimAmount);
         claimed = true;
         (bool success,) = factoryContract.call(abi.encodeWithSignature("claimInsurance()"));
         require(success, "Transaction Failed in claim");
