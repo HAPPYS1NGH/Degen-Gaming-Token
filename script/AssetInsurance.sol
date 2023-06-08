@@ -10,6 +10,7 @@ contract AssetInsuranceScript is Script {
         vm.startBroadcast(deployerPrivateKey);
         CryptoAssetInsuranceFactory factory =
             new CryptoAssetInsuranceFactory{value : 1 ether}(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        console.log("factory address: %s", address(factory));
         vm.stopBroadcast();
     }
 }
