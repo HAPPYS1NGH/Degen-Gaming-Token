@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.18;
+pragma solidity ^0.8.19;
 
 import "../interfaces/AggregatorV3Interface.sol";
 import "../interfaces/IERC20.sol";
+import "../utils/ReentrancyGuard.sol";
 
 /**
  * @title CryptoAssetInsuranceFactory
  * @dev A contract for creating and managing crypto asset insurance contracts.
  */
+
 contract CryptoAssetInsuranceFactory {
     address immutable owner;
     address immutable ethToUsd;
@@ -16,13 +18,33 @@ contract CryptoAssetInsuranceFactory {
     mapping(address => address) public contractToCustomer;
     mapping(uint8 => uint8) public plans;
 
+    /////////////////////////
+    // Errors   /////////////
+    /////////////////////////
+    error InvalidPlan();
+    error InvalidOracleAddress();
+    error ZeroAddress();
+    error InsufficientInitialValue();
+    error onlyOwner();
+    error InsufficientContractBalance();
+    error FailedToSendFunds();
+    error InsuranceAlreadyPurchased();
+    error InvalidTokenAmount();
+    error InsufficientFunds();
+    error InvalidCustomer();
+    error InvalidClaimAmount();
+
     /**
      * @dev Constructor function.
      * @param _ethToUsd The address of the ETH to USD price oracle contract.
      */
     constructor(address _ethToUsd) payable {
-        require(msg.value >= 0.1 ether, "Insufficient initial value");
-        require(_ethToUsd != address(0), "Invalid oracle address");
+        if (msg.value < 2 ether) {
+            revert InsufficientInitialValue();
+        }
+        if (_ethToUsd == address(0)) {
+            revert ZeroAddress();
+        }
         owner = msg.sender;
         plans[1] = 1;
         plans[2] = 5;
@@ -45,10 +67,16 @@ contract CryptoAssetInsuranceFactory {
      * @param amount The amount of funds to withdraw.
      */
     function withdraw(uint256 amount) public payable {
-        require(msg.sender == owner, "Only contract owner can call this function");
-        require(address(this).balance >= amount, "Insufficient contract balance");
+        if (msg.sender != owner) {
+            revert onlyOwner();
+        }
+        if (address(this).balance < amount) {
+            revert InsufficientContractBalance();
+        }
         (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "Failed to send funds");
+        if (!success) {
+            revert FailedToSendFunds();
+        }
     }
 
     /**
@@ -156,14 +184,22 @@ contract CryptoAssetInsuranceFactory {
         uint256 decimals,
         uint256 tokensInsured
     ) public payable {
-        require(customerToContract[msg.sender] == address(0), "Insurance contract already exists for the customer");
+        if (customerToContract[msg.sender] != address(0)) {
+            revert InsuranceAlreadyPurchased();
+        }
         uint256 totalTokens = getTokenBalance(assetAddress, msg.sender);
-        require(tokensInsured > 0 && tokensInsured <= totalTokens, "Invalid token amount");
+        if (tokensInsured <= 0 || tokensInsured > totalTokens) {
+            revert InvalidTokenAmount();
+        }
         uint8 _plan = plans[plan];
-        require(_plan != 0, "Invalid plan");
+        if (_plan == 0) {
+            revert InvalidPlan();
+        }
         uint256 priceAtInsurance = getFeedValueOfAsset(oracleAddress);
         uint256 pricePayable = calculateDepositMoney(tokensInsured, _plan, priceAtInsurance, decimals, timePeriod);
-        require(msg.value == (pricePayable), "Incorrect insurance amount sent");
+        if (msg.value < pricePayable) {
+            revert InsufficientFunds();
+        }
         address insuranceContract = address(
             new AssetWalletInsurance(
                 msg.sender,
@@ -187,16 +223,24 @@ contract CryptoAssetInsuranceFactory {
      */
     function claimInsurance() public payable {
         require(contractToCustomer[msg.sender] != address(0), "Only insurance contracts can call this function");
-
+        if (contractToCustomer[msg.sender] == address(0)) {
+            revert InvalidCustomer();
+        }
         AssetWalletInsurance instance = AssetWalletInsurance(payable(msg.sender));
         uint256 _claimAmount = instance.getClaimAmount();
         uint256 _decimals = instance.decimals();
-        require(_claimAmount != 0, "Claim amount should not be 0");
+        if (_claimAmount == 0) {
+            revert InvalidClaimAmount();
+        }
         uint256 conversionRate = getUsdToWei();
         uint256 amountSent = (conversionRate * _claimAmount) / 10 ** _decimals;
-        require(amountSent < address(this).balance, "Not enough funds in contract");
+        if (amountSent > address(this).balance) {
+            revert InsufficientFunds();
+        }
         (bool sent,) = msg.sender.call{value: amountSent}("");
-        require(sent, "Transaction was not successful");
+        if (!sent) {
+            revert FailedToSendFunds();
+        }
     }
 }
 
@@ -204,7 +248,7 @@ contract CryptoAssetInsuranceFactory {
  * @title AssetWalletInsurance
  * @dev Contract representing the insurance for an asset wallet.
  */
-contract AssetWalletInsurance {
+contract AssetWalletInsurance is ReentrancyGuard {
     address public immutable owner;
     address public immutable assetAddress;
     uint256 public immutable tokensInsured;
@@ -213,15 +257,27 @@ contract AssetWalletInsurance {
     uint256 public claimAmount;
     address public immutable factoryContract;
     address public immutable oracleAddress;
-    uint256 public priceAtInsurance;
-    uint256 public decimals;
+    uint256 public immutable priceAtInsurance;
+    uint256 public immutable decimals;
     bool public claimed;
+
+    //////////////////////////
+    // Errors   //////////////
+    //////////////////////////
+    error OnlyOwner();
+    error TransactionFailed();
+    error AlreadyClaimedReward();
+    error InvalidClaimAmount();
+    error InsuranceExpired();
+    error NoChangeInAssetPrice();
 
     /**
      * @dev Modifier to check if the caller is the owner of the insurance contract.
      */
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner");
+        if (msg.sender != owner) {
+            revert OnlyOwner();
+        }
         _;
     }
 
@@ -231,7 +287,7 @@ contract AssetWalletInsurance {
      * @param _assetAddress The address of the asset token.
      * @param _tokensInsured The number of tokens insured.
      * @param _plan The insurance plan (1, 2, or 3).
-     * @param _timePeriod The insurance time period.
+     * @param _timePeriod The insurance time period in months.
      * @param _factoryContract The address of the insurance factory contract.
      * @param _oracleAddress The address of the price oracle contract for the asset.
      * @param _priceAtInsurance The price of the asset at the time of insurance.
@@ -263,17 +319,21 @@ contract AssetWalletInsurance {
 
     function withdrawClaim() public payable onlyOwner {
         (bool success,) = owner.call{value: address(this).balance}("");
-        require(success, "Failed Transaction");
+        if (!success) {
+            revert TransactionFailed();
+        }
     }
 
     function claim() public onlyOwner {
-        require(!claimed, "Already Claimed Reward");
+        if (claimed) {
+            revert AlreadyClaimedReward();
+        }
         verifyInsurance();
-        // console.log("Claim amount is //////////////");
-        // console.log(claimAmount);
         claimed = true;
         (bool success,) = factoryContract.call(abi.encodeWithSignature("claimInsurance()"));
-        require(success, "Transaction Failed in claim");
+        if (!success) {
+            revert TransactionFailed();
+        }
     }
 
     function getClaimAmount() public view returns (uint256) {
@@ -288,12 +348,20 @@ contract AssetWalletInsurance {
      * @dev Verifies the insurance and calculates the claim amount.
      */
     function verifyInsurance() internal onlyOwner {
-        require(timePeriod > block.timestamp, "Oops, your insurance has expired");
-        require(!claimed, "Already claimed");
+        if (block.timestamp > timePeriod) {
+            revert InsuranceExpired();
+        }
+        if (claimed) {
+            revert AlreadyClaimedReward();
+        }
         uint256 currentPrice = getFeedValueOfAsset(oracleAddress);
-        require(currentPrice < priceAtInsurance, "There is no change in asset price");
+        if (currentPrice >= priceAtInsurance) {
+            revert NoChangeInAssetPrice();
+        }
         uint256 totalAmount = getInsuranceAmount(currentPrice);
-        require(totalAmount > 0, "No claimable amount");
+        if (totalAmount == 0) {
+            revert InvalidClaimAmount();
+        }
         uint256 maximumClaimableAmount = (totalAmount * plan) / 10;
         if (totalAmount < maximumClaimableAmount) {
             claimAmount = totalAmount;
@@ -351,11 +419,15 @@ contract AssetWalletInsurance {
     /**
      * @dev Allows the owner of the insurance contract to claim the insurance amount.
      */
-    function claimInsurance() external onlyOwner {
+    function claimInsurance() external nonReentrant onlyOwner {
         verifyInsurance();
-        require(claimAmount > 0, "Claim amount should not be 0");
+        if (claimAmount == 0) {
+            revert InvalidClaimAmount();
+        }
         (bool sent,) = msg.sender.call{value: claimAmount}("");
-        require(sent, "Transaction was not successful");
+        if (!sent) {
+            revert TransactionFailed();
+        }
         claimed = true;
     }
 }
