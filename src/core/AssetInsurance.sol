@@ -11,13 +11,6 @@ import "../utils/ReentrancyGuard.sol";
  */
 
 contract CryptoAssetInsuranceFactory {
-    address immutable owner;
-    address immutable ethToUsd;
-    address[] customers;
-    mapping(address => address) public customerToContract;
-    mapping(address => address) public contractToCustomer;
-    mapping(uint8 => uint8) public plans;
-
     /////////////////////////
     // Errors   /////////////
     /////////////////////////
@@ -35,10 +28,30 @@ contract CryptoAssetInsuranceFactory {
     error InvalidClaimAmount();
 
     /////////////////////////
+    // Variables ////////////
+    /////////////////////////
+
+    address immutable owner;
+    address immutable ethToUsd;
+    mapping(address => address) public customerToContract;
+    mapping(address => address) public contractToCustomer;
+    mapping(uint8 => uint8) public plans;
+    address[] customers;
+
+    /////////////////////////
     // Events   /////////////
     /////////////////////////
+
     event InsurancePurchased(address indexed customer, address indexed contractAddress, uint256 amount);
     event ClaimedInsurance(address indexed contractAddress, uint256 amount);
+
+    /////////////////////////
+    // Functions ////////////
+    /////////////////////////
+
+    /////////////////////////
+    // Constructor //////////
+    /////////////////////////
 
     /**
      * @dev Constructor function.
@@ -58,13 +71,9 @@ contract CryptoAssetInsuranceFactory {
         ethToUsd = _ethToUsd;
     }
 
-    /**
-     * @dev Returns the owner of the contract.
-     * @return The address of the contract owner.
-     */
-    function getOwner() public view returns (address) {
-        return owner;
-    }
+    /////////////////////////
+    // Receive   ////////////
+    /////////////////////////
 
     receive() external payable {}
 
@@ -83,6 +92,100 @@ contract CryptoAssetInsuranceFactory {
         if (!success) {
             revert FailedToSendFunds();
         }
+    }
+
+    /////////////////////////
+    // Public Functions /////
+    /////////////////////////
+
+    /**
+     * @dev Creates a new insurance contract for the specified asset.
+     * @param plan The insurance plan (1, 2, or 3).
+     * @param assetAddress The address of the asset token.
+     * @param timePeriod The insurance time period.
+     * @param oracleAddress The address of the price oracle contract for the asset.
+     * @param decimals The number of decimals for the asset.
+     * @param tokensInsured The number of tokens to be insured.
+     */
+    function getInsurance(
+        uint8 plan,
+        address assetAddress,
+        uint256 timePeriod,
+        address oracleAddress,
+        uint256 decimals,
+        uint256 tokensInsured
+    ) public payable {
+        if (customerToContract[msg.sender] != address(0)) {
+            revert InsuranceAlreadyPurchased();
+        }
+        uint256 totalTokens = getTokenBalance(assetAddress, msg.sender);
+        if (tokensInsured <= 0 || tokensInsured > totalTokens) {
+            revert InvalidTokenAmount();
+        }
+        uint8 _plan = plans[plan];
+        if (_plan == 0) {
+            revert InvalidPlan();
+        }
+        uint256 priceAtInsurance = getFeedValueOfAsset(oracleAddress);
+        uint256 pricePayable = calculateDepositMoney(tokensInsured, _plan, priceAtInsurance, decimals, timePeriod);
+        if (msg.value < pricePayable) {
+            revert InsufficientFunds();
+        }
+        address insuranceContract = address(
+            new AssetWalletInsurance(
+                msg.sender,
+                assetAddress,
+                tokensInsured,
+                _plan,
+                timePeriod,
+                (address(this)),
+                oracleAddress,
+                priceAtInsurance,
+                decimals
+            )
+        );
+        customerToContract[msg.sender] = insuranceContract;
+        contractToCustomer[insuranceContract] = msg.sender;
+        customers.push(msg.sender);
+        emit InsurancePurchased(msg.sender, insuranceContract, pricePayable);
+    }
+
+    /**
+     * @dev Allows an insurance contract to claim the insurance amount.
+     */
+    function claimInsurance() public payable {
+        require(contractToCustomer[msg.sender] != address(0), "Only insurance contracts can call this function");
+        if (contractToCustomer[msg.sender] == address(0)) {
+            revert InvalidCustomer();
+        }
+        AssetWalletInsurance instance = AssetWalletInsurance(payable(msg.sender));
+        uint256 _claimAmount = instance.getClaimAmount();
+        uint256 _decimals = instance.decimals();
+        if (_claimAmount == 0) {
+            revert InvalidClaimAmount();
+        }
+        uint256 conversionRate = getUsdToWei();
+        uint256 amountSent = (conversionRate * _claimAmount) / 10 ** _decimals;
+        if (amountSent > address(this).balance) {
+            revert InsufficientFunds();
+        }
+        (bool sent,) = msg.sender.call{value: amountSent}("");
+        if (!sent) {
+            revert FailedToSendFunds();
+        }
+        emit ClaimedInsurance(msg.sender, amountSent);
+    }
+
+    /////////////////////////
+    // View Functions ///////
+    /////////////////////////
+
+    /**
+     * @dev Returns the owner of the contract.
+     * @return The address of the contract owner.
+     */
+    function getOwner() public view returns (address) {
+        return owner;
     }
 
     /**
@@ -172,84 +275,6 @@ contract CryptoAssetInsuranceFactory {
             (_priceAtInsurance * _tokens * _plan * _timePeriod * conversionRate) / (10 ** (_decimals * 2 + 2));
         return pricePayable;
     }
-
-    /**
-     * @dev Creates a new insurance contract for the specified asset.
-     * @param plan The insurance plan (1, 2, or 3).
-     * @param assetAddress The address of the asset token.
-     * @param timePeriod The insurance time period.
-     * @param oracleAddress The address of the price oracle contract for the asset.
-     * @param decimals The number of decimals for the asset.
-     * @param tokensInsured The number of tokens to be insured.
-     */
-    function getInsurance(
-        uint8 plan,
-        address assetAddress,
-        uint256 timePeriod,
-        address oracleAddress,
-        uint256 decimals,
-        uint256 tokensInsured
-    ) public payable {
-        if (customerToContract[msg.sender] != address(0)) {
-            revert InsuranceAlreadyPurchased();
-        }
-        uint256 totalTokens = getTokenBalance(assetAddress, msg.sender);
-        if (tokensInsured <= 0 || tokensInsured > totalTokens) {
-            revert InvalidTokenAmount();
-        }
-        uint8 _plan = plans[plan];
-        if (_plan == 0) {
-            revert InvalidPlan();
-        }
-        uint256 priceAtInsurance = getFeedValueOfAsset(oracleAddress);
-        uint256 pricePayable = calculateDepositMoney(tokensInsured, _plan, priceAtInsurance, decimals, timePeriod);
-        if (msg.value < pricePayable) {
-            revert InsufficientFunds();
-        }
-        address insuranceContract = address(
-            new AssetWalletInsurance(
-                msg.sender,
-                assetAddress,
-                tokensInsured,
-                _plan,
-                timePeriod,
-                (address(this)),
-                oracleAddress,
-                priceAtInsurance,
-                decimals
-            )
-        );
-        customerToContract[msg.sender] = insuranceContract;
-        contractToCustomer[insuranceContract] = msg.sender;
-        customers.push(msg.sender);
-        emit InsurancePurchased(msg.sender, insuranceContract, pricePayable);
-    }
-
-    /**
-     * @dev Allows an insurance contract to claim the insurance amount.
-     */
-    function claimInsurance() public payable {
-        require(contractToCustomer[msg.sender] != address(0), "Only insurance contracts can call this function");
-        if (contractToCustomer[msg.sender] == address(0)) {
-            revert InvalidCustomer();
-        }
-        AssetWalletInsurance instance = AssetWalletInsurance(payable(msg.sender));
-        uint256 _claimAmount = instance.getClaimAmount();
-        uint256 _decimals = instance.decimals();
-        if (_claimAmount == 0) {
-            revert InvalidClaimAmount();
-        }
-        uint256 conversionRate = getUsdToWei();
-        uint256 amountSent = (conversionRate * _claimAmount) / 10 ** _decimals;
-        if (amountSent > address(this).balance) {
-            revert InsufficientFunds();
-        }
-        (bool sent,) = msg.sender.call{value: amountSent}("");
-        if (!sent) {
-            revert FailedToSendFunds();
-        }
-        emit ClaimedInsurance(msg.sender, amountSent);
-    }
 }
 
 /**
@@ -257,6 +282,19 @@ contract CryptoAssetInsuranceFactory {
  * @dev Contract representing the insurance for an asset wallet.
  */
 contract AssetWalletInsurance is ReentrancyGuard {
+    //////////////////////////
+    // Errors   //////////////
+    //////////////////////////
+    error OnlyOwner();
+    error TransactionFailed();
+    error AlreadyClaimedReward();
+    error InvalidClaimAmount();
+    error InsuranceExpired();
+    error NoChangeInAssetPrice();
+
+    //////////////////////////
+    // State Variables ///////
+    //////////////////////////
     address public immutable owner;
     address public immutable assetAddress;
     uint256 public immutable tokensInsured;
@@ -270,14 +308,8 @@ contract AssetWalletInsurance is ReentrancyGuard {
     bool public claimed;
 
     //////////////////////////
-    // Errors   //////////////
+    // Modifiers /////////////
     //////////////////////////
-    error OnlyOwner();
-    error TransactionFailed();
-    error AlreadyClaimedReward();
-    error InvalidClaimAmount();
-    error InsuranceExpired();
-    error NoChangeInAssetPrice();
 
     /**
      * @dev Modifier to check if the caller is the owner of the insurance contract.
@@ -288,6 +320,14 @@ contract AssetWalletInsurance is ReentrancyGuard {
         }
         _;
     }
+
+    //////////////////////////
+    // Functions /////////////
+    //////////////////////////
+
+    /////////////////////////
+    // Constructor //////////
+    /////////////////////////
 
     /**
      * @dev Initializes the insurance contract.
@@ -323,8 +363,38 @@ contract AssetWalletInsurance is ReentrancyGuard {
         decimals = _decimals;
     }
 
+    /////////////////////////
+    // Receive Function /////
+    /////////////////////////
+
     receive() external payable {}
 
+    /////////////////////////
+    // External Functions ///
+    /////////////////////////
+
+    /**
+     * @dev Allows the owner of the insurance contract to claim the insurance amount.
+     */
+    function claimInsurance() external nonReentrant onlyOwner {
+        verifyInsurance();
+        if (claimAmount == 0) {
+            revert InvalidClaimAmount();
+        }
+        (bool sent,) = msg.sender.call{value: claimAmount}("");
+        if (!sent) {
+            revert TransactionFailed();
+        }
+        claimed = true;
+    }
+
+    /////////////////////////
+    // Public Functions /////
+    /////////////////////////
+
+    /**
+     * @dev Allows the owner of the insurance contract to withdraw the claim amount.
+     */
     function withdrawClaim() public payable onlyOwner {
         (bool success,) = owner.call{value: address(this).balance}("");
         if (!success) {
@@ -332,6 +402,9 @@ contract AssetWalletInsurance is ReentrancyGuard {
         }
     }
 
+    /**
+     * @dev Allows the owner of the insurance contract to claim the insurance amount and receive the value in Ether.
+     */
     function claim() public onlyOwner {
         if (claimed) {
             revert AlreadyClaimedReward();
@@ -344,16 +417,12 @@ contract AssetWalletInsurance is ReentrancyGuard {
         }
     }
 
-    function getClaimAmount() public view returns (uint256) {
-        return claimAmount;
-    }
-
-    function isClaimed() public view returns (bool) {
-        return claimed;
-    }
+    /////////////////////////
+    // Internal Functions ///
+    /////////////////////////
 
     /**
-     * @dev Verifies the insurance and calculates the claim amount.
+     * @dev Verifies the insurance and sets the claim amount.
      */
     function verifyInsurance() internal onlyOwner {
         if (block.timestamp > timePeriod) {
@@ -377,6 +446,46 @@ contract AssetWalletInsurance is ReentrancyGuard {
             claimAmount = maximumClaimableAmount;
         }
     }
+
+    /////////////////////////
+    // Public View //////////
+    /////////////////////////
+
+    /**
+     * @dev Calculates the insurance amount based on the current asset price.
+     * @param _currentPrice The current price of the asset.
+     * @return The total insurance amount.
+     */
+    function getInsuranceAmount(uint256 _currentPrice) public view returns (uint256) {
+        uint256 tokensHold = getTokenBalance(assetAddress, owner);
+        uint256 claimableTokens;
+        if (tokensHold < tokensInsured) {
+            claimableTokens = tokensHold;
+        } else {
+            claimableTokens = tokensInsured;
+        }
+        return (((priceAtInsurance - _currentPrice) * claimableTokens) / 10 ** decimals);
+    }
+
+    /**
+     * @dev Retrieves the claim amount state variable which would be claimed by the owner.
+     * @return The claimamount.
+     */
+    function getClaimAmount() public view returns (uint256) {
+        return claimAmount;
+    }
+
+    /**
+     * @dev Checks if the insurance has been claimed.
+     * @return True if the insurance has been claimed.
+     */
+    function isClaimed() public view returns (bool) {
+        return claimed;
+    }
+
+    /////////////////////////
+    // Internal View ///
+    /////////////////////////
 
     /**
      * @dev Retrieves the token balance of an account for a given token address.
@@ -406,36 +515,5 @@ contract AssetWalletInsurance is ReentrancyGuard {
             /*uint80 answeredInRound */
         ) = priceConsumer.latestRoundData();
         return uint256(price);
-    }
-
-    /**
-     * @dev Calculates the insurance amount based on the current asset price.
-     * @param _currentPrice The current price of the asset.
-     * @return The total insurance amount.
-     */
-    function getInsuranceAmount(uint256 _currentPrice) public view returns (uint256) {
-        uint256 tokensHold = getTokenBalance(assetAddress, owner);
-        uint256 claimableTokens;
-        if (tokensHold < tokensInsured) {
-            claimableTokens = tokensHold;
-        } else {
-            claimableTokens = tokensInsured;
-        }
-        return (((priceAtInsurance - _currentPrice) * claimableTokens) / 10 ** decimals);
-    }
-
-    /**
-     * @dev Allows the owner of the insurance contract to claim the insurance amount.
-     */
-    function claimInsurance() external nonReentrant onlyOwner {
-        verifyInsurance();
-        if (claimAmount == 0) {
-            revert InvalidClaimAmount();
-        }
-        (bool sent,) = msg.sender.call{value: claimAmount}("");
-        if (!sent) {
-            revert TransactionFailed();
-        }
-        claimed = true;
     }
 }
