@@ -34,6 +34,12 @@ contract CryptoAssetInsuranceFactory {
     error InvalidCustomer();
     error InvalidClaimAmount();
 
+    /////////////////////////
+    // Events   /////////////
+    /////////////////////////
+    event InsurancePurchased(address indexed customer, address indexed contractAddress, uint256 amount);
+    event ClaimedInsurance(address indexed contractAddress, uint256 amount);
+
     /**
      * @dev Constructor function.
      * @param _ethToUsd The address of the ETH to USD price oracle contract.
@@ -216,6 +222,7 @@ contract CryptoAssetInsuranceFactory {
         customerToContract[msg.sender] = insuranceContract;
         contractToCustomer[insuranceContract] = msg.sender;
         customers.push(msg.sender);
+        emit InsurancePurchased(msg.sender, insuranceContract, pricePayable);
     }
 
     /**
@@ -241,6 +248,7 @@ contract CryptoAssetInsuranceFactory {
         if (!sent) {
             revert FailedToSendFunds();
         }
+        emit ClaimedInsurance(msg.sender, amountSent);
     }
 }
 
