@@ -58,7 +58,7 @@ contract CryptoAssetInsuranceFactory {
      * @param _ethToUsd The address of the ETH to USD price oracle contract.
      */
     constructor(address _ethToUsd) payable {
-        if (msg.value < 2 ether) {
+        if (msg.value < 0.1 ether) {
             revert InsufficientInitialValue();
         }
         if (_ethToUsd == address(0)) {
@@ -376,17 +376,17 @@ contract AssetWalletInsurance is ReentrancyGuard {
     /**
      * @dev Allows the owner of the insurance contract to claim the insurance amount.
      */
-    function claimInsurance() external nonReentrant onlyOwner {
-        verifyInsurance();
-        if (claimAmount == 0) {
-            revert InvalidClaimAmount();
-        }
-        (bool sent,) = msg.sender.call{value: claimAmount}("");
-        if (!sent) {
-            revert TransactionFailed();
-        }
-        claimed = true;
-    }
+    // function claimInsurance() external nonReentrant onlyOwner {
+    //     verifyInsurance();
+    //     if (claimAmount == 0) {
+    //         revert InvalidClaimAmount();
+    //     }
+    //     (bool sent,) = msg.sender.call{value: claimAmount}("");
+    //     if (!sent) {
+    //         revert TransactionFailed();
+    //     }
+    //     claimed = true;
+    // }
 
     /////////////////////////
     // Public Functions /////
@@ -405,7 +405,7 @@ contract AssetWalletInsurance is ReentrancyGuard {
     /**
      * @dev Allows the owner of the insurance contract to claim the insurance amount and receive the value in Ether.
      */
-    function claim() public onlyOwner {
+    function claim() public onlyOwner nonReentrant {
         if (claimed) {
             revert AlreadyClaimedReward();
         }
@@ -484,7 +484,7 @@ contract AssetWalletInsurance is ReentrancyGuard {
     }
 
     /////////////////////////
-    // Internal View ///
+    // Internal View ////////
     /////////////////////////
 
     /**
